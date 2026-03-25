@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>實驗 9.10：長期酸雨生態模擬 | Ecology Simulation</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        :root {
+            --soil-height: 100px;
+        }
+        .simulation-area {
+            position: relative;
+            height: 480px;
+            background: linear-gradient(to bottom, #87CEEB 0%, #E0F6FF 100%);
+            overflow: hidden;
+            border-radius: 0.75rem;
+            transition: all 1s ease;
+        }
+        
+        /* 泥土層 */
+        .soil {
+            position: absolute;
+            bottom: 0;
+            width: 100%;
+            height: var(--soil-height);
+            background: linear-gradient(to bottom, #6d4c41 0%, #3e2723 100%);
+            z-index: 10;
+        }
+
+        /* 礦物質粒子 */
+        .mineral-particle {
+            position: absolute;
+            width: 4px;
+            height: 4px;
+            background-color: #fde047;
+            border-radius: 50%;
+            box-shadow: 0 0 3px #fef08a;
+            transition: transform 1.5s ease, opacity 1.5s ease;
+        }
+        .mineral-particle.leached {
+            opacity: 0;
+            transform: translateY(50px);
+        }
+
+        /* 植物容器佈局 */
+        #plantContainer {
+            position: absolute;
+            bottom: calc(var(--soil-height) - 5px);
+            width: 100%;
+            height: 300px;
+            display: flex;
+            justify-content: space-around;
+            align-items: flex-end;
+            z-index: 20;
+            padding: 0 20px;
+        }
+
+        /* 植物主體 */
+        .plant {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            transition: all 0.5s ease;
+            position: relative;
+        }
+
+        .stem {
+            width: 6px;
+            background-color: #4ade80;
+            border-radius: 3px;
+            transition: height 0.5s ease, background-color 1.2s ease;
+            position: relative;
+        }
+
+        .leaf {
+            position: absolute;
+            width: 24px;
+            height: 12px;
+            background-color: #4ade80;
+            border-radius: 50% 0 50% 0;
+            transition: all 1.2s ease;
+        }
+        .leaf.left { right: 4px; transform-origin: right center; border-radius: 0 50% 0 50%; }
+        .leaf.right { left: 4px; transform-origin: left center; }
+
+        /* 雨點動畫 */
+        .raindrop {
+            position: absolute;
+            width: 1px;
+            height: 12px;
+            background-color: rgba(255, 255, 255, 0.4);
+            animation: fall linear infinite;
+        }
+        @keyframes fall {
+            0% { transform: translateY(-20px); opacity: 0.8; }
+            100% { transform: translateY(480px); opacity: 0; }
+        }
+
+        /* 自定義滑桿顏色 */
+        .ph-slider::-webkit-slider-runnable-track {
+            background: linear-gradient(to right, #ef4444, #f97316, #eab308, #22c55e);
+            height: 8px;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body class="bg-slate-100 p-3 md:p-8 font-sans text-slate-800">
+
+    <div class="max-w-6xl mx-auto bg-white rounded-2xl shadow-2xl overflow-hidden border border-slate-200">
+        
+        <header class="bg-indigo-800 text-white p-6">
+            <h1 class="text-2xl md:text-3xl font-bold">長期酸雨生態模擬系統</h1>
+            <p class="text-indigo-200 text-sm">Long-term Ecological Impact of Acid Rain & Mineral Depletion</p>
+        </header>
+
+        <div class="flex flex-col lg:flex-row">
+            
+            <!-- 控制區 -->
+            <div class="w-full lg:w-80 p-6 bg-slate-50 border-r border-slate-200 space-y-8">
+                
+                <!-- 模式切換 -->
+                <div>
+                    <label class="block text-sm font-bold text-slate-700 mb-3">觀察規模 (Scale)</label>
+                    <div class="grid grid-cols-2 gap-2">
+                        <button id="modeSingle" class="py-2 px-3 rounded-lg border-2 border-indigo-600 bg-indigo-50 text-indigo-700 font-bold text-sm transition">
+                            單一植物
+                        </button>
+                        <button id="modeForest" class="py-2 px-3 rounded-lg border-2 border-transparent bg-white text-slate-600 font-bold text-sm shadow-sm hover:border-slate-300 transition">
+                            森林群落
+                        </button>
+                    </div>
+                </div>
+
+                <!-- pH 控制 -->
+                <div>
+                    <div class="flex justify-between mb-2">
+                        <label class="text-sm font-bold text-slate-700">雨水 pH 值</label>
+                        <span id="phVal" class="text-lg font-mono font-bold text-indigo-600">5.6</span>
+                    </div>
+                    <input type="range" id="phInput" min="3.0" max="7.0" step="0.1" value="5.6" class="w-full h-2 rounded-lg appearance-none cursor-pointer ph-slider">
+                    <div class="flex justify-between text-[10px] text-slate-400 mt-1 uppercase font-bold">
+                        <span>強酸</span>
+                        <span>中性</span>
+                    </div>
+                </div>
+
+                <!-- 長時間跨度控制 -->
+                <div>
+                    <div class="flex justify-between mb-2">
+                        <label class="text-sm font-bold text-slate-700">模擬跨度 (1-365天)</label>
+                        <span id="dayVal" class="text-lg font-mono font-bold text-indigo-600">0</span>
+                    </div>
+                    <input type="range" id="dayInput" min="0" max="365" step="1" value="0" class="w-full h-2 bg-slate-300 rounded-lg appearance-none cursor-pointer">
+                </div>
+
+                <!-- 操作按鈕 -->
+                <div class="flex gap-2">
+                    <button id="playBtn" class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-xl font-bold transition shadow-lg flex items-center justify-center gap-2">
+                        <span>播放模擬</span>
+                    </button>
+                    <button id="resetBtn" class="bg-slate-200 hover:bg-slate-300 text-slate-700 px-4 rounded-xl font-bold transition">
+                        重設
+                    </button>
+                </div>
+
+                <div class="p-4 bg-blue-50 rounded-xl border border-blue-100">
+                    <h4 class="text-xs font-bold text-blue-800 mb-1 italic underline">科學筆記：</h4>
+                    <p class="text-[11px] text-blue-700 leading-relaxed">
+                        酸雨中的 H⁺ 離子會置換泥土中的 Ca²⁺、Mg²⁺ 和 K⁺ 等離子。長期酸雨會導致泥土完全失去養分，甚至令有毒的鋁離子釋出，使植物死亡。
+                    </p>
+                </div>
+            </div>
+
+            <!-- 顯示區 -->
+            <div class="flex-1 relative bg-slate-100 flex flex-col">
+                
+                <!-- 實時狀態面板 -->
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-2 p-4 z-30">
+                    <div class="bg-white/80 backdrop-blur border border-slate-200 p-2 rounded-xl shadow-sm">
+                        <p class="text-[10px] uppercase text-slate-500 font-bold">平均高度</p>
+                        <p id="statHeight" class="text-lg font-mono font-bold">5.0 cm</p>
+                    </div>
+                    <div class="bg-white/80 backdrop-blur border border-slate-200 p-2 rounded-xl shadow-sm">
+                        <p class="text-[10px] uppercase text-slate-500 font-bold">礦物質含量</p>
+                        <p id="statMineral" class="text-lg font-mono font-bold text-amber-600">100%</p>
+                    </div>
+                    <div class="bg-white/80 backdrop-blur border border-slate-200 p-2 rounded-xl shadow-sm">
+                        <p class="text-[10px] uppercase text-slate-500 font-bold">生態狀態</p>
+                        <p id="statHealth" class="text-xs font-bold mt-1 text-green-600">茂盛</p>
+                    </div>
+                    <div class="bg-white/80 backdrop-blur border border-slate-200 p-2 rounded-xl shadow-sm">
+                        <p class="text-[10px] uppercase text-slate-500 font-bold">長期影響</p>
+                        <p id="statImpact" class="text-[10px] font-bold mt-1 leading-tight text-slate-600">無顯著損害</p>
+                    </div>
+                </div>
+
+                <!-- 模擬畫布 -->
+                <div class="simulation-area mx-4 mb-4 shadow-inner border border-slate-200 bg-white">
+                    <div id="rainLayer" class="absolute inset-0 z-40 pointer-events-none"></div>
+                    <div id="plantContainer"></div>
+                    <div id="soilLayer" class="soil"></div>
+                </div>
+
+                <!-- 解說區 -->
+                <div class="px-6 pb-6 mt-auto">
+                    <div class="bg-white rounded-xl p-4 border border-slate-200 shadow-sm">
+                        <h3 class="font-bold text-slate-800 mb-1 flex items-center gap-2">
+                            <span id="conclusionIcon">🌿</span>
+                            長期觀察結果 (Long-term Observation)
+                        </h3>
+                        <p id="observationText" class="text-sm text-slate-600 leading-relaxed">
+                            在 pH 5.6 的正常環境下，植物能夠在一年內持續健康生長。
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const config = {
+            single: { count: 1, stemWidth: 12, leafSize: 35, spread: 0 },
+            forest: { count: 8, stemWidth: 5, leafSize: 18, spread: 15 }
+        };
+
+        let currentMode = 'single';
+        let isPlaying = false;
+        let playInterval;
+        let mineralParticles = [];
+
+        // DOM
+        const phInput = document.getElementById('phInput');
+        const dayInput = document.getElementById('dayInput');
+        const plantContainer = document.getElementById('plantContainer');
+        const soilLayer = document.getElementById('soilLayer');
+        const rainLayer = document.getElementById('rainLayer');
+        
+        // Stats
+        const statHeight = document.getElementById('statHeight');
+        const statMineral = document.getElementById('statMineral');
+        const statHealth = document.getElementById('statHealth');
+        const statImpact = document.getElementById('statImpact');
+        const observationText = document.getElementById('observationText');
+
+        function initMinerals() {
+            soilLayer.innerHTML = '';
+            mineralParticles = [];
+            const count = currentMode === 'single' ? 60 : 120;
+            for(let i=0; i<count; i++) {
+                const p = document.createElement('div');
+                p.className = 'mineral-particle';
+                p.style.left = Math.random() * 100 + '%';
+                p.style.top = Math.random() * 80 + '%';
+                soilLayer.appendChild(p);
+                mineralParticles.push(p);
+            }
+        }
+
+        function createPlants() {
+            plantContainer.innerHTML = '';
+            const c = config[currentMode];
+            for(let i=0; i<c.count; i++) {
+                const p = document.createElement('div');
+                p.className = 'plant';
+                
+                const stem = document.createElement('div');
+                stem.className = 'stem';
+                stem.style.width = c.stemWidth + 'px';
+                
+                // Add leaves
+                for(let l=0; l<8; l++) {
+                    const leaf = document.createElement('div');
+                    leaf.className = `leaf ${l % 2 === 0 ? 'left' : 'right'}`;
+                    leaf.style.bottom = (l * (c.leafSize/1.5) + 10) + 'px';
+                    leaf.style.width = c.leafSize + 'px';
+                    leaf.style.height = (c.leafSize/2) + 'px';
+                    stem.appendChild(leaf);
+                }
+
+                p.appendChild(stem);
+                plantContainer.appendChild(p);
+            }
+        }
+
+        function updateSimulation() {
+            const ph = parseFloat(phInput.value);
+            const days = parseInt(dayInput.value);
+            document.getElementById('phVal').textContent = ph.toFixed(1);
+            document.getElementById('dayVal').textContent = days;
+
+            // 1. 礦物質流失計算 (Long-term Leaching)
+            // 基礎流失率：pH每低1度，每日流失約 0.25%
+            const lossRate = ph < 5.6 ? (5.6 - ph) * 0.4 : 0;
+            const mineralPercent = Math.max(0, 100 - (lossRate * days));
+            statMineral.textContent = Math.round(mineralPercent) + '%';
+            
+            // 更新粒子
+            const visibleCount = Math.floor((mineralPercent/100) * mineralParticles.length);
+            mineralParticles.forEach((p, i) => {
+                if(i >= visibleCount) p.classList.add('leached');
+                else p.classList.remove('leached');
+            });
+
+            // 2. 植物生長計算
+            // 正常生長：每日 0.05cm (一年約18cm)
+            // 若礦物質 < 50%，生長變慢。若 < 20%，停止生長並開始萎縮
+            let avgH = 5.0;
+            for(let d=1; d<=days; d++) {
+                const currentM = Math.max(0, 100 - (lossRate * d));
+                if(currentM > 60) avgH += 0.05;
+                else if(currentM > 20) avgH += 0.01;
+                else avgH -= 0.01; // 枯萎減少高度
+            }
+            avgH = Math.max(2.0, avgH);
+            statHeight.textContent = avgH.toFixed(1) + ' cm';
+
+            // 3. 視覺效果更新
+            const plants = document.querySelectorAll('.plant');
+            const stems = document.querySelectorAll('.stem');
+            
+            stems.forEach(s => {
+                s.style.height = (avgH * 10) + 'px';
+                
+                // 顏色邏輯
+                if(mineralPercent > 70) {
+                    s.style.backgroundColor = '#4ade80';
+                } else if(mineralPercent > 30) {
+                    s.style.backgroundColor = '#a3e635'; // 變淺黃綠
+                } else {
+                    s.style.backgroundColor = '#713f12'; // 枯褐色
+                }
+
+                const leaves = s.querySelectorAll('.leaf');
+                leaves.forEach((l, idx) => {
+                    if(mineralPercent > 70) {
+                        l.style.backgroundColor = '#4ade80';
+                        l.style.transform = `rotate(${idx % 2 === 0 ? '-15deg' : '15deg'})`;
+                        l.style.opacity = '1';
+                    } else if(mineralPercent > 30) {
+                        l.style.backgroundColor = '#facc15'; // 黃色
+                        l.style.transform = `rotate(${idx % 2 === 0 ? '-40deg' : '40deg'})`;
+                        l.style.opacity = '1';
+                    } else {
+                        l.style.backgroundColor = '#451a03'; // 焦黑/枯死
+                        l.style.transform = `rotate(${idx % 2 === 0 ? '-70deg' : '70deg'}) translateY(10px)`;
+                        if(mineralPercent < 10 && idx > 2) l.style.opacity = '0';
+                    }
+                });
+            });
+
+            // 4. 狀態與解說
+            let healthTxt, healthClass, impactTxt, obsTxt, icon;
+            if(mineralPercent > 80) {
+                healthTxt = "茂盛 (Lush)";
+                healthClass = "text-green-600";
+                impactTxt = "生態系統平衡";
+                obsTxt = `在 pH ${ph} 下，泥土養分充足。經過 ${days} 天，植物生長健壯，高度達 ${avgH.toFixed(1)}cm。`;
+                icon = "🌿";
+            } else if(mineralPercent > 40) {
+                healthTxt = "營養不良 (Malnutrited)";
+                healthClass = "text-yellow-600";
+                impactTxt = "中度礦物質流失";
+                obsTxt = `由於雨水具酸性，泥土中的礦物質正逐漸流失。植物因缺乏營養導致葉綠素生成受阻，開始發黃。`;
+                icon = "⚠️";
+            } else {
+                healthTxt = "生態崩潰 (Ecological Collapse)";
+                healthClass = "text-red-600";
+                impactTxt = "土地貧瘠化/毒性";
+                obsTxt = `長期受酸雨侵害 (${days} 天)，泥土養分幾乎耗盡。植物無法維持生命，根部受損，群落出現大面積死亡。`;
+                icon = "💀";
+            }
+            
+            statHealth.textContent = healthTxt;
+            statHealth.className = `text-xs font-bold mt-1 ${healthClass}`;
+            statImpact.textContent = impactTxt;
+            observationText.innerHTML = obsTxt;
+            document.getElementById('conclusionIcon').textContent = icon;
+
+            // 背景天空隨 pH 變化
+            const gloom = ph < 5.6 ? (5.6 - ph) / 2.6 : 0;
+            const r = 135 - (50 * gloom);
+            const g = 206 - (80 * gloom);
+            const b = 235 - (100 * gloom);
+            document.querySelector('.simulation-area').style.background = `linear-gradient(to bottom, rgb(${r},${g},${b}), #f1f5f9)`;
+        }
+
+        function spawnRain() {
+            rainLayer.innerHTML = '';
+            const ph = parseFloat(phInput.value);
+            if(ph >= 5.6 && !isPlaying) return;
+
+            const count = ph < 5.0 ? 80 : 40;
+            for(let i=0; i<count; i++) {
+                const d = document.createElement('div');
+                d.className = 'raindrop';
+                d.style.left = Math.random() * 100 + '%';
+                d.style.animationDuration = (0.4 + Math.random() * 0.4) + 's';
+                d.style.animationDelay = Math.random() * 1 + 's';
+                rainLayer.appendChild(d);
+            }
+        }
+
+        // Toggle Mode
+        document.getElementById('modeSingle').onclick = (e) => {
+            currentMode = 'single';
+            e.target.className = "py-2 px-3 rounded-lg border-2 border-indigo-600 bg-indigo-50 text-indigo-700 font-bold text-sm transition";
+            document.getElementById('modeForest').className = "py-2 px-3 rounded-lg border-2 border-transparent bg-white text-slate-600 font-bold text-sm shadow-sm hover:border-slate-300 transition";
+            resetSimulation();
+        };
+
+        document.getElementById('modeForest').onclick = (e) => {
+            currentMode = 'forest';
+            e.target.className = "py-2 px-3 rounded-lg border-2 border-indigo-600 bg-indigo-50 text-indigo-700 font-bold text-sm transition";
+            document.getElementById('modeSingle').className = "py-2 px-3 rounded-lg border-2 border-transparent bg-white text-slate-600 font-bold text-sm shadow-sm hover:border-slate-300 transition";
+            resetSimulation();
+        };
+
+        function resetSimulation() {
+            isPlaying = false;
+            clearInterval(playInterval);
+            dayInput.value = 0;
+            document.getElementById('playBtn').textContent = "播放模擬";
+            createPlants();
+            initMinerals();
+            updateSimulation();
+            rainLayer.innerHTML = '';
+        }
+
+        document.getElementById('playBtn').onclick = () => {
+            if(isPlaying) {
+                clearInterval(playInterval);
+                document.getElementById('playBtn').textContent = "繼續模擬";
+                isPlaying = false;
+            } else {
+                if(dayInput.value == 365) dayInput.value = 0;
+                document.getElementById('playBtn').textContent = "暫停";
+                isPlaying = true;
+                spawnRain();
+                playInterval = setInterval(() => {
+                    let d = parseInt(dayInput.value);
+                    if(d < 365) {
+                        dayInput.value = d + 1;
+                        updateSimulation();
+                    } else {
+                        clearInterval(playInterval);
+                        isPlaying = false;
+                        document.getElementById('playBtn').textContent = "重新播放";
+                    }
+                }, 50);
+            }
+        };
+
+        document.getElementById('resetBtn').onclick = resetSimulation;
+        phInput.oninput = () => {
+            updateSimulation();
+            if(isPlaying) spawnRain();
+        };
+        dayInput.oninput = updateSimulation;
+
+        // Init
+        resetSimulation();
+    </script>
+</body>
+</html>
